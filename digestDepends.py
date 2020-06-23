@@ -14,14 +14,17 @@ def extract_includes_from_file(source: FileName) -> Set[str]:
     """ Return a set of relative filenames included by a given source file. """
     includes = set()
     prog = re.compile('#include *[<"]([^">]*)[">]')
-    with open(source, 'r') as f:
-        for line in f:
-            match = prog.match(line)
-            if match:
-                item = match.group(1)
-                includes.add(item)
+    try:
+        with open(source, 'r') as f:
+            for line in f:
+                match = prog.match(line)
+                if match:
+                    item = match.group(1)
+                    includes.add(item)
+                pass
             pass
-        pass
+    except:
+        print(f"Failed to open file {source}")
     return includes
 
 
@@ -105,40 +108,20 @@ def get_unique_list(items):
     return result
 
 
-def digest_depend_file(filename: FileName) -> List[FileName]:
-    """ Return list or normalized files referenced in a .depend file.
 
-    :param filename: Name of the .depend file.
-    :return: List of normalized dependencies.
-    """
-    depend_dir = os.path.dirname(filename)
-    referenced_files = []
-    with open(filename, 'r') as f:
-        num = 0
-        for line in f:
-            if num == 0:
-                colon = line.find(":")
-                line = line[colon + 1:]
-            items = digest_line(line, depend_dir)
-            referenced_files = referenced_files + items
-            num = num + 1
-            pass
-        pass
-    return referenced_files
-
-
-def digest_line(line, depend_directory):
+def digest_line(line, source_directory):
     """ Return a list of normalized dependencies mentioned on the given line.
 
     :param line: The line to digest
-    :param depend_directory: directory to which relative files are relative
+    :param source_directory: directory to which relative files are relative
     :return: List of normalized dependency file names.
     """
-    line = line.strip("\\\n")
     items = line.split()
     normedItems = []
     for item in items:
-        normed = DigestDepends.normalize_file(item, depend_directory)
+        if item[0] == ".":
+            print(f"Relative item = {item}")
+        normed = DigestDepends.normalize_file(item, source_directory)
         normedItems.append(normed)
     return normedItems
 
@@ -213,6 +196,72 @@ class DigestDepends:
         self.tag = tag
         self.project_root_directory = project_root_directory
 
+
+    def digest_depend_file(self, filename: FileName) -> List[FileName]:
+        """ Return list or normalized files referenced in a .depend file.
+
+        :param filename: Name of the .depend file.
+        :return: List of normalized dependencies.
+        """
+        depend_dir = os.path.dirname(filename)
+        referenced_files = []
+        with open(filename, 'r') as f:
+            num = 0
+            objfile = ""
+            source_dir = ""
+            for line in f:
+                line = line.strip("\\\n")
+                if objfile == "":
+                    # Extract object file.
+                    colon = line.find(":")
+                    objfile = line[:colon].strip()
+                    relative_obj_dir = os.path.dirname(objfile)
+                    line = line[colon + 1:].strip()
+                if source_dir == "":
+                    # Need to extract source and source directory.
+                    items = line.split()
+                    if len(items) > 0:
+                        if len(items) > 1:
+                            print(f"multiple items on first line")
+                        source_file = items[0]
+                        items = items[1:]
+                        line = " ".join(items)
+                        source_dir0 = os.path.dirname(source_file)
+                        if source_dir0 != "":
+                            print(f"For source file {source_file}, source_dir not empty = {source_dir}")
+                        # assert(source_dir == "")
+                        # Find the real source directory. Relative paths in the
+                        # depend file are relative to the source file location.
+                        # The .d file is stored in the directory with the .o file.
+                        if len(relative_obj_dir) == 0:
+                            # Object and source in same directory, so .d is in same
+                            # directory also.
+                            source_dir = depend_dir
+                            absolute_source_file = os.path.join(source_dir, source_file)
+                        else:
+                            assert (relative_obj_dir[0:3] == "../")
+                            suffix = relative_obj_dir[3:]
+                            assert (depend_dir.endswith(suffix))
+                            prefix = depend_dir[:-len(suffix)]
+                            source_dir = prefix + "src"
+                            absolute_source_file = os.path.join(source_dir, source_file)
+                            if not os.path.exists(absolute_source_file):
+                                source_dir = prefix + "src_opt"
+                                absolute_source_file = os.path.join(source_dir, source_file)
+                            pass
+                        if not os.path.exists(absolute_source_file):
+                            print(f"File does not exists: {absolute_source_file}")
+
+                if source_dir != "":
+                    items = digest_line(line, source_dir)
+                else:
+                    print(f"Source was not on first line: {filename}")
+                referenced_files = referenced_files + items
+                num = num + 1
+                pass
+            pass
+        return referenced_files
+
     def get_depend_files(self) -> List[FileName]:
         """ Return a list of depend files under the specified directory tree.
 
@@ -221,7 +270,7 @@ class DigestDepends:
         file_iter = (os.path.join(root, f)
                      for root, _, files in os.walk(self.project_root_directory)
                      for f in files)
-        depend_file_iter = (f for f in file_iter if os.path.splitext(f)[1] == '.depend')
+        depend_file_iter = (f for f in file_iter if os.path.splitext(f)[1] == '.d')
         return [f for f in depend_file_iter]
 
     def get_source_files(self, extensions: Set[str]) -> List[FileName]:
@@ -236,22 +285,24 @@ class DigestDepends:
         return source_files
 
     @staticmethod
-    def normalize_file(file, depend_directory):
+    def normalize_file(file, source_directory):
         """ Normalize file by converting relative files to absolute
 
         :param file: File name to be normalized
-        :param depend_directory: relative files are relative to this directory
+        :param source_directory: relative files are relative to this directory
         :return: Normalized file
         """
         #if file.find('/.') != -1:
         #    print("Found file with dot: " + file)  # To check for embedded . or ..
 
         if file[0] != '/':
-            file = os.path.join(depend_directory, file)
+            file = os.path.join(source_directory, file)
         file = os.path.abspath(file)
         real_file = os.path.realpath(file)
         if real_file != file:
             file = real_file
+        if not os.path.exists(file):
+            print(f"File does not exists: {file}")
         return file
 
     def get_unique_depend_files(self) -> List[FileName]:
@@ -262,7 +313,7 @@ class DigestDepends:
         depend_files = self.get_depend_files()
         digested_contents = []
         for file in depend_files:
-            digested = digest_depend_file(file)
+            digested = self.digest_depend_file(file)
             digested_contents = digested_contents + digested
         unique_list = get_unique_list(digested_contents)
         return unique_list
@@ -344,6 +395,7 @@ class DigestDepends:
           analyses that do look at everything in the source directories.
         """
         referenced_files = self.get_unique_depend_files()
+        self.write_lines_with_newline("referenced_files", referenced_files)
         extensions = get_source_extensions(referenced_files)
         all_includes = extract_includes_from_files(referenced_files)
         all_includes_filtered = filter_includes(all_includes, referenced_files)

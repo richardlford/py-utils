@@ -1,6 +1,8 @@
+
 # Program to digest make depend files
 import os
 import re
+import sys
 from typing import Dict, List, Set
 from collections import defaultdict
 
@@ -15,15 +17,24 @@ def extract_includes_from_file(source: FileName) -> Set[str]:
     includes = set()
     prog = re.compile('#include *[<"]([^">]*)[">]')
     try:
-        with open(source, 'r') as f:
-            for line in f:
-                match = prog.match(line)
-                if match:
-                    item = match.group(1)
-                    includes.add(item)
+        with open(source, 'r', encoding="latin-1") as f:
+            try:
+                line_num = 0
+                for line in f:
+                    line_num = line_num + 1
+                    try:
+                        match = prog.match(line)
+                        if match:
+                            item = match.group(1)
+                            includes.add(item)
+                        pass
+                    except:
+                        print(f"Unexpected error on line {line_num}:", sys.exc_info()[0])
                 pass
-            pass
+            except:
+                print("Unexpected error:", sys.exc_info()[0])
     except:
+        print("Unexpected error:", sys.exc_info()[0])
         print(f"Failed to open file {source}")
     return includes
 
@@ -77,7 +88,8 @@ def get_unique_directories(filelist: List[FileName],
         if simple in how_included:
             paths = how_included[simple]
             if len(paths) > 1:
-                print("multiple paths")
+                pass
+                # print("multiple paths")
             for path in paths:
                 if file.endswith('/' + path):
                     ref_dir = file[0: len(file) - len(path) - 1]
@@ -120,7 +132,8 @@ def digest_line(line, source_directory):
     normedItems = []
     for item in items:
         if item[0] == ".":
-            print(f"Relative item = {item}")
+            pass
+            # print(f"Relative item = {item}")
         normed = DigestDepends.normalize_file(item, source_directory)
         normedItems.append(normed)
     return normedItems
@@ -179,7 +192,27 @@ def filter_includes(all_includes: List[FileName], referenced_files: List[FileNam
             if len(prefixes) > 1:
                 ambiguous_includes.add(include)
         else:
-            print("include filtered out: " + include)
+            print("include "
+                  ""
+                  ""
+                  ""
+                  ""
+                  "cd"
+                  ""
+                  ""
+                  ""
+                  ""
+                  ""
+
+
+
+
+
+
+type p                  ""
+                  ""
+                  ""
+                  ": " + include)
     return result
 
 
@@ -205,7 +238,7 @@ class DigestDepends:
         """
         depend_dir = os.path.dirname(filename)
         referenced_files = []
-        with open(filename, 'r') as f:
+        with open(filename, 'r', encoding="latin-1") as f:
             num = 0
             objfile = ""
             source_dir = ""
@@ -222,7 +255,8 @@ class DigestDepends:
                     items = line.split()
                     if len(items) > 0:
                         if len(items) > 1:
-                            print(f"multiple items on first line")
+                            pass
+                            # print(f"multiple items on first line")
                         source_file = items[0]
                         items = items[1:]
                         line = " ".join(items)
@@ -249,13 +283,15 @@ class DigestDepends:
                                 source_dir = prefix + "src_opt"
                                 absolute_source_file = os.path.join(source_dir, source_file)
                             pass
+                        referenced_files.append(absolute_source_file)
                         if not os.path.exists(absolute_source_file):
                             print(f"File does not exists: {absolute_source_file}")
 
                 if source_dir != "":
                     items = digest_line(line, source_dir)
                 else:
-                    print(f"Source was not on first line: {filename}")
+                    pass
+                    # print(f"Source was not on first line: {filename}")
                 referenced_files = referenced_files + items
                 num = num + 1
                 pass
@@ -381,7 +417,7 @@ class DigestDepends:
 
     def write_lines_with_newline(self, destination_filename: FileName, lines: List[str]) -> None:
         """ Write lines to destination_filename appending a newline to each line. """
-        with open(destination_filename + '-' + self.tag + ".txt", "w") as w:
+        with open(destination_filename + self.tag + ".txt", "w") as w:
             for line in lines:
                 w.write(line + '\n')
         pass
@@ -429,6 +465,6 @@ class DigestDepends:
 
 if __name__ == u'__main__':
     print('Digesting dependency files\n')
-    digester = DigestDepends(os.getcwd(), 'CPU_B')
+    digester = DigestDepends(os.getcwd(), '')
     digester.process_depend_files()
     print('\ndone.\n')

@@ -26,7 +26,7 @@ def exported_to_dict(filename: FileName, key_fields: List) -> (Dict, List):
     The fields of the first line are the keys to the fields. Each subsequent line
     is made a dictionary that maps those keys to the corresponding field values.
 
-    :param filename: The Polspace check file to process.
+    :param filename: The Polyspace check file to process.
     :param key_fields: A subset of the keys that are sufficient to uniquely identify a finding.
     :return: A pair consisting of a dictionary and a list.
     - The dictionary has an entry for each non-header line in which the key is formed from the

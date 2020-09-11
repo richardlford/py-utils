@@ -47,6 +47,8 @@ class FactorOptions:
     def __init__(self, input_filename):
         self.input_filename = input_filename
         self.output_filename = input_filename + ".factored"
+        self.includes_filename = input_filename + ".includes"
+        self.defines_filename = input_filename + ".defines"
         self.lines = self.read_input
         # Collect the -options-for-sources lines.
         self.ofs_lines = [line for line in self.lines if line.startswith("-options-for-sources ")]
@@ -154,6 +156,21 @@ class FactorOptions:
                 w.write(line + '\n')
         pass
 
+    def output_defines(self):
+        with open(self.defines_filename, "w") as w:
+            for line in self.common_other:
+                w.write(line + '\n')
+        pass
+
+
+    def output_includes(self):
+        with open(self.includes_filename, "w") as w:
+            for line in self.common_usr_includes:
+                w.write(line + '\n')
+            for line in self.common_includes:
+                w.write(line + '\n')
+        pass
+
 
 if __name__ == u'__main__':
     print('Factoring PolySpace Code Prover options\n')
@@ -163,4 +180,6 @@ if __name__ == u'__main__':
 
     factor = FactorOptions(options[1])
     factor.output_factored()
+    factor.output_defines()
+    factor.output_includes()
     print('\ndone.\n')

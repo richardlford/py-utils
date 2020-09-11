@@ -138,6 +138,7 @@ class PolyDiff:
         """
         self.project_root_directory = project_root_directory
 
+
     def do_diff2(self, dir1: DirectoryName, dir2: DirectoryName, file_root: FileName, diff_dir: DirectoryName):
         """
         Compute and output the differences between two Polyspace check files.
@@ -155,12 +156,12 @@ class PolyDiff:
         keyFields = ["Family", "Detail", "File", "Line", "Col", "Folder", "Class", "Function"]
         d1, d1FieldKeys = exported_to_dict(fullFile1, keyFields)
         d2, d2FieldKeys = exported_to_dict(fullFile2, keyFields)
-        assert (d1FieldKeys == d2FieldKeys)
+        # assert (d1FieldKeys == d2FieldKeys)
         d1OnlyKeys, d2OnlyKeys, inBothKeys = compare_dicts(d1, d2)
         out_root = os.path.splitext(file_root)[0]
         write_dicts(d1FieldKeys, d1OnlyKeys, d1, os.path.join(fullDiffDir, out_root + "-d1Only.txt"))
-        write_dicts(d1FieldKeys, d2OnlyKeys, d2, os.path.join(fullDiffDir, out_root + "-d2Only.txt"))
-        check_consistency(d1FieldKeys, inBothKeys, d1, d2)
+        write_dicts(d2FieldKeys, d2OnlyKeys, d2, os.path.join(fullDiffDir, out_root + "-d2Only.txt"))
+        check_consistency(keyFields, inBothKeys, d1, d2)
         write_dicts(d1FieldKeys, inBothKeys, d1, os.path.join(fullDiffDir, out_root + "-inBoth.txt"))
         pass
 

@@ -19,7 +19,7 @@ DirectoryName = str
 FileName = str
 
 
-def exported_to_dict(filename: FileName, key_fields: List) -> (Dict, List):
+def exported1_to_dict(filename: FileName, key_fields: List) -> (Dict, List):
     """
     Read Polyspace check file returning a dictionary of dictionaries and a list of key field names.
 
@@ -38,20 +38,32 @@ def exported_to_dict(filename: FileName, key_fields: List) -> (Dict, List):
     with open(filename, 'r', encoding="latin-1") as f:
         num = 0
         for line in f:
-            num = num + 1
             line = line.strip("\\\n")
             fields = line.split('\t')
+            if fields[0].strip(' ') == '':
+                continue
+            num = num + 1
             if num == 1:
                 keys = fields
                 keysSet = set(keys)
                 for k in key_fields:
-                    if k not in keysSet:
+                    if k != 'Line' and k not in keysSet:
                         print(f'key {k} in not in the keysSet')
                 continue
             entry = {}
             for i in range(len(keys)):
-                entry[keys[i]] = fields[i]
+                if i < len(fields):
+                    entry[keys[i]] = fields[i]
+                else:
+                    entry[keys[i]] = ''
                 pass
+            location_fields = entry.pop('Location').split(':')
+            path = location_fields[0]
+            directory = os.path.dirname(path)
+            file = os.path.basename(path)
+            entry['Folder'] = directory
+            entry['File'] = file
+            entry['Line'] = location_fields[1].strip(' ')
             keyfieldValues = [entry[k] for k in key_fields]
             entryKey = '\t'.join(keyfieldValues)
             if entryKey in result_dict:
@@ -63,6 +75,55 @@ def exported_to_dict(filename: FileName, key_fields: List) -> (Dict, List):
 
     return result_dict, keys
 
+def exported2_to_dict(filename: FileName, key_fields: List) -> (Dict, List):
+    """
+    Read Polyspace check file returning a dictionary of dictionaries and a list of key field names.
+
+    The fields of the first line are the keys to the fields. Each subsequent line
+    is made a dictionary that maps those keys to the corresponding field values.
+
+    :param filename: The Polyspace check file to process.
+    :param key_fields: A subset of the keys that are sufficient to uniquely identify a finding.
+    :return: A pair consisting of a dictionary and a list.
+    - The dictionary has an entry for each non-header line in which the key is formed from the
+      line using the key_fields (concatenated together), and the value is a dictionary giving
+      the values for the fields of that line.
+    - The list is the list of keys as extracted from the header line of the file.
+    """
+    result_dict = {}
+    with open(filename, 'r', encoding="latin-1") as f:
+        num = 0
+        for line in f:
+            line = line.strip("\\\n")
+            fields = line.split('\t')
+            if fields[0].strip(' ') == '':
+                continue
+            num = num + 1
+            if num == 1:
+                keys = fields
+                keysSet = set(keys)
+                for k in key_fields:
+                    if k != 'Location' and k not in keysSet:
+                        print(f'key {k} in not in the keysSet')
+                continue
+            entry = {}
+            for i in range(len(keys)):
+                if i < len(fields):
+                    entry[keys[i]] = fields[i]
+                else:
+                    entry[keys[i]] = ''
+
+            keyfieldValues = [entry[k] for k in key_fields]
+
+            entryKey = '\t'.join(keyfieldValues)
+            if entryKey in result_dict:
+                existing_entry = result_dict[entryKey]
+                print(f"Ambiguous data for key={entryKey}, \n    existing={existing_entry}\n    new={entry}\n")
+            else:
+                result_dict[entryKey] = entry
+            pass
+
+    return result_dict, keys
 
 def compare_dicts(d1: Dict, d2: Dict) -> (List, List, List):
     """Compare keys of two dictionaries returning list of keys only in first, only in second, or in both."""
@@ -70,6 +131,15 @@ def compare_dicts(d1: Dict, d2: Dict) -> (List, List, List):
     d2Only = [k for k in d2.keys() if k not in d1]
     inBoth = [k for k in d1.keys() if k in d2]
     return d1Only, d2Only, inBoth
+
+def merge_dictionaries(d1: Dict, d2: Dict, inboth: List):
+    for k in inboth:
+        entry1 = d1[k]
+        entry2 = d2[k]
+        for key in entry1.keys():
+            if key not in entry2:
+                entry2[key] = entry1[key]
+    pass
 
 
 """ Write dictionary to file.
@@ -91,7 +161,13 @@ def write_dicts(field_keys: List, entry_keys: List, d: Dict, filename: FileName)
         w.write(line + '\n')
         for entryKey in entry_keys:
             entry = d[entryKey]
-            fields = [entry[key] for key in field_keys]
+            fields = []
+            for key in field_keys:
+                if key in entry:
+                    field = entry[key]
+                else:
+                    field = ''
+                fields.append(field)
             line = "\t".join(fields)
             w.write(line + '\n')
             pass
@@ -139,28 +215,36 @@ class PolyDiff:
         self.project_root_directory = project_root_directory
 
 
-    def do_diff2(self, dir1: DirectoryName, dir2: DirectoryName, file_root: FileName, diff_dir: DirectoryName):
+    def do_diff2(self, input_file1: FileName, input_file2: FileName, merge_file: FileName):
         """
         Compute and output the differences between two Polyspace check files.
 
-        :param dir1: Relative subdirectory holding the first file.
-        :param dir2: Relative subdirectory holding the second file.
-        :param file_root: The name of the Polyspace check file (same in each subdirectory)
-        :param diff_dir: Relative subdirectory into which the output is written.
+        :param input_file1: Path holding the first file.
+        :param input_file2: Path holding the second file.
+        :param merge_file: Result file
         :return: None, but output is written into files.
         """
-        fullFile1 = os.path.join(self.project_root_directory, dir1, file_root)
-        fullFile2 = os.path.join(self.project_root_directory, dir2, file_root)
-        fullDiffDir = os.path.join(self.project_root_directory, diff_dir)
-        os.makedirs(fullDiffDir, exist_ok=True)
-        keyFields = ["Family", "Detail", "File", "Line", "Col", "Folder", "Class", "Function"]
-        d1, d1FieldKeys = exported_to_dict(fullFile1, keyFields)
-        d2, d2FieldKeys = exported_to_dict(fullFile2, keyFields)
+        fullFile1 = input_file1
+        fullFile2 = input_file2
+        merge_dir = os.path.dirname(merge_file)
+        os.makedirs(merge_dir, exist_ok=True)
+        out_root = os.path.splitext(merge_file)[0]
+        d1only_file = out_root + ".d1only.txt"
+        keyFields = ["Family", "File", "Line", "Col", "Folder", "Class", "Function", "Detail"]
+        d1, d1FieldKeys = exported1_to_dict(fullFile1, keyFields)
+        d2, d2FieldKeys = exported2_to_dict(fullFile2, keyFields)
         # assert (d1FieldKeys == d2FieldKeys)
         d1OnlyKeys, d2OnlyKeys, inBothKeys = compare_dicts(d1, d2)
-        out_root = os.path.splitext(file_root)[0]
-        write_dicts(d1FieldKeys, d1OnlyKeys, d1, os.path.join(fullDiffDir, out_root + "-d1Only.txt"))
-        write_dicts(d2FieldKeys, d2OnlyKeys, d2, os.path.join(fullDiffDir, out_root + "-d2Only.txt"))
+        merge_dictionaries(d1, d2, inBothKeys)
+        d2_field_keys_set = set(d2FieldKeys)
+        output_field_keys = d2FieldKeys
+        for field in d1FieldKeys:
+            if field == 'Location':
+                continue
+            if field not in d2_field_keys_set:
+                output_field_keys.append(field)
+        write_dicts(output_field_keys, d2.keys(), d2, merge_file)
+        write_dicts(d1FieldKeys, d1OnlyKeys, d1, d1only_file)
         check_consistency(keyFields, inBothKeys, d1, d2)
         write_dicts(d1FieldKeys, inBothKeys, d1, os.path.join(fullDiffDir, out_root + "-inBoth.txt"))
         pass
@@ -168,7 +252,7 @@ class PolyDiff:
 
 def usage():
     """ Usage:
-    python3 poly-export-diff.py dir1 dir2 file_root diff_dir
+    python3 poly-export-diff.py input_file1 input_file2 merged_root.txt
 
     Compares the contents of Polyspace output files
 
@@ -176,9 +260,8 @@ def usage():
 
     and produces the following files
 
-        ./diff_dir/root-d1Only.txt
-        ./diff_dir/root-d2Only.txt
-        ./diff_dir/root-both.txt
+        merged_root-d1only.txt
+        merged_root.txt
 
     where root is file_root with its file extension removed.
     The output files are in the same format as the input files,
@@ -190,13 +273,13 @@ def usage():
 
 
 if __name__ == u'__main__':
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 4:
         usage()
 
     options = sys.argv[1:]
-    (dir1_arg, dir2_arg, file_root_arg, diff_dir_arg) = options
+    (input_file1_arg, input_file2_arg, merge_file) = options
 
     print('Finding differences in Polyspace result export files\n')
     differ = PolyDiff(os.getcwd())
-    differ.do_diff2(dir1_arg, dir2_arg, file_root_arg, diff_dir_arg)
+    differ.do_diff2(input_file1_arg, input_file2_arg, merge_file)
     print('\ndone.\n')

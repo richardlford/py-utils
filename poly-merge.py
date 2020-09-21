@@ -57,7 +57,8 @@ def exported1_to_dict(filename: FileName, key_fields: List) -> (Dict, List):
                 else:
                     entry[keys[i]] = ''
                 pass
-            location_fields = entry.pop('Location').split(':')
+            # Keep the Location field for use in outputting non-matches.
+            location_fields = entry['Location'].split(':')
             path = location_fields[0]
             directory = os.path.dirname(path)
             file = os.path.basename(path)
@@ -146,18 +147,20 @@ def merge_dictionaries(d1: Dict, d2: Dict, inboth: List):
 """
 
 
-def write_dicts(field_keys: List, entry_keys: List, d: Dict, filename: FileName):
+def write_dicts(field_keys: List, caption_keys: List, entry_keys: List, d: Dict, filename: FileName):
     """
     Write the specified fields of a specified entries of a dictionary of dictionaries to file.
 
     :param d: The input dictionary of dictionaries.
     :param entry_keys: A list of keys of d whose corresponding dictionaries are to be output.
     :param field_keys: The fields of the inner dictionaries that are to be output (in the given order).
+    :param caption_keys: The names of the fields that are to appear in the header. This allows the
+    fields to have different names externally than internally.
     :param filename: The name of the file that is to be written.
     :return: Nothing
     """
     with open(filename, "w") as w:
-        line = "\t".join(field_keys)
+        line = "\t".join(caption_keys)
         w.write(line + '\n')
         for entryKey in entry_keys:
             entry = d[entryKey]
@@ -236,17 +239,18 @@ class PolyDiff:
         # assert (d1FieldKeys == d2FieldKeys)
         d1OnlyKeys, d2OnlyKeys, inBothKeys = compare_dicts(d1, d2)
         merge_dictionaries(d1, d2, inBothKeys)
-        d2_field_keys_set = set(d2FieldKeys)
-        output_field_keys = d2FieldKeys
-        for field in d1FieldKeys:
-            if field == 'Location':
-                continue
-            if field not in d2_field_keys_set:
-                output_field_keys.append(field)
-        write_dicts(output_field_keys, d2.keys(), d2, merge_file)
-        write_dicts(d1FieldKeys, d1OnlyKeys, d1, d1only_file)
-        check_consistency(keyFields, inBothKeys, d1, d2)
-        write_dicts(d1FieldKeys, inBothKeys, d1, os.path.join(fullDiffDir, out_root + "-inBoth.txt"))
+        output_field_keys = d2FieldKeys.copy()
+        caption_keys = d2FieldKeys.copy()
+        output_field_keys.append('1st Analyst')
+        caption_keys.append('1.4 Analyst')
+        output_field_keys.append('1st Status')
+        caption_keys.append('1.4 Status')
+        output_field_keys.append('1st Criticality')
+        caption_keys.append('1.4 Criticality')
+        output_field_keys.append('1st Rationale')
+        caption_keys.append('1.4 Rationale')
+        write_dicts(output_field_keys, caption_keys, d2.keys(), d2, merge_file)
+        write_dicts(d1FieldKeys, d1FieldKeys, d1OnlyKeys, d1, d1only_file)
         pass
 
 

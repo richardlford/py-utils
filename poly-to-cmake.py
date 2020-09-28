@@ -4,19 +4,13 @@ and generated CMakeLists.txt files for each directory in the target repository.
 """
 import os
 import re
-import sys
 from typing import Dict, List, Set, FrozenSet
 from collections import defaultdict
+from dicttoxml import dicttoxml
+from xml.dom.minidom import parseString
 
 DirectoryName = str
 FileName = str
-
-
-def usage():
-    print(""" Usage:
-    python factoroptions.py input-options-filename
-    """)
-    sys.exit(1)
 
 
 def get_includes(line: str) -> Set[str]:
@@ -145,15 +139,86 @@ class CmakeConfigure:
         else:
             return arg
 
+    def normalize_dir(self, the_dir: DirectoryName):
+        if not the_dir.endswith("/"):
+            return the_dir + "/"
+        else:
+            return the_dir
 
-    def __init__(self, input_filename: FileName, output_dir: DirectoryName, path_maps: List[DirectoryName]):
+    def get_vocabulary(self) -> List[str]:
+        result: Set[str] = set()
+        for file in list(self.ofs_dict):
+            values = self.ofs_dict[file]
+            for value in values:
+                result.add(value)
+        result_list1 = list(result)
+        result_list2 = sorted(result_list1)
+        return result_list2
+
+    def filter_vocabulary(self):
+        """
+        Remove specifications we think will cause problems.
+        """
+        filter_set = set();
+        for value in self.vocabulary:
+            v: str = value
+            if v.startswith('-D _'):
+                filter_set.add(v)
+            elif v.startswith('-I /usr'):
+                filter_set.add(v)
+            elif v.startswith('-D BIG'):
+                filter_set.add(v)
+            #elif v.startswith('-D CPU'):
+            #    filter_set.add(v)
+            elif v.startswith('-D NRTSIM'):
+                filter_set.add(v)
+            elif v.startswith('-D TARGET_CPU'):
+                filter_set.add(v)
+            elif v.startswith('-D i386'):
+                filter_set.add(v)
+            elif v.startswith('-c-version'):
+                filter_set.add(v)
+            elif v.startswith('-cpp-version '):
+                filter_set.add(v)
+            elif v.startswith('-lang '):
+                filter_set.add(v)
+
+        # Allow some others
+
+        filter_list = list(filter_set)
+        remnant = set(self.vocabulary) - filter_set
+        sorted_remnant = sorted(list(remnant))
+        defines = [value for value in sorted_remnant if value.startswith('-D ')]
+        includes = [value for value in sorted_remnant if value.startswith('-I ')]
+        other = [value for value in sorted_remnant if not value.startswith('-I ') and not value.startswith('-D ')]
+
+        # Now edit the ofs_dict removing the filtered items.
+        for file in list(self.ofs_dict):
+            old_items = self.ofs_dict[file]
+            new_items = [item for item in old_items if not item in filter_set]
+            self.ofs_dict[file] = new_items
+            pass
+
+        # Now for some kludges.
+
+        print("Done filtering")
+
+    def __init__(self, input_filename: FileName, triples: List[str]):
         self.input_filename = input_filename
-        self.output_dir = output_dir
-        self.adjusted_paths = [path + '/' if not path.endswith("/") else path for path in path_maps]
-        # Target without trailing slash.
-        self.adjusted_target_dir = self.adjusted_paths[1][:-1]
-        self.adjust_dict = dict([[self.adjusted_paths[i], self.adjusted_paths[i+1]]
-                                 for i in range(0, len(self.adjusted_paths), 2)])
+        self.adjust_dict = {}
+        self.symbol_dict = {}
+        for i, triple in enumerate(triples):
+            old, symbol, new = triple.split(';')
+            old = self.normalize_dir(old)
+            new = self.normalize_dir(new)
+            symbol_ref = '${' + symbol + "}"
+            self.adjust_dict[old] = symbol_ref + '/'
+            self.symbol_dict[symbol] = new
+            if i == 0:
+                self.output_dir = new
+                # Target without trailing slash.
+                self.adjusted_target_dir = symbol_ref
+
         self.lines = self.read_input
         # Collect the -options-for-sources lines.
         self.ofs_lines = [line[len("-options-for-sources "):] for line in self.lines if line.startswith("-options-for-sources ")]
@@ -162,6 +227,8 @@ class CmakeConfigure:
         # Get ofs_dict in sorted order.
         self.filenames = sorted(ofs_dict0.keys())
         self.ofs_dict = dict([[file, ofs_dict0[file]] for file in self.filenames])
+        self.vocabulary = self.get_vocabulary()
+        self.filter_vocabulary()
         self.partition = partition_parts(self.ofs_dict)
         self.indices_dict = get_file_partition_indices(self.ofs_dict, self.partition)
         self.group_list, self.group_index_to_files, self.file_group, self.group_index_to_dirs, self.dir_groups = \
@@ -203,60 +270,203 @@ class CmakeConfigure:
             return lines
 
 
-    def output_simple_cmake_file_for_dir(self, dir: DirectoryName, w):
-        w.write(f"Simple cmake for dir={dir}\n")
-        return
-
-    def output_cmake_file_for_dir(self, dir: DirectoryName):
-
-        if not dir.startswith(self.adjusted_target_dir):
-            # Skip directories not in the main tree.
-            print(f"Skipping dir={dir}")
-            return
-
-        print(f"Processing dir={dir}")
-        relative_dir = dir[len(self.adjusted_target_dir):]
-        actual_target_dir = self.output_dir + relative_dir
-        os.makedirs(actual_target_dir, exist_ok=True)
-        cmake_file = os.path.join(actual_target_dir, "CMakeLists.txt")
-        with open(cmake_file, "w") as w:
-            if len(self.dir_groups[dir]) == 1:
-                self.output_simple_cmake_file_for_dir(dir, w)
-            else:
-                w.write(f"Complex dir={dir}\n")
-
-        print(f"Done processing dir={dir}")
-
-        pass
-
     def find_children_dirs(self):
-        children_dict: Dict[DirectoryName, Set[DirectoryName]] = {}
+        children_dict: Dict[DirectoryName, List[DirectoryName]] = {}
         for the_dir in list(self.dir_groups):
-            parent = os.path.dirname(the_dir)
-            child = the_dir
+            parent: DirectoryName = os.path.dirname(the_dir)
+            child: DirectoryName = the_dir
             while parent != '':
                 if parent in children_dict:
-                    parent_set = children_dict[parent]
+                    children_list = children_dict[parent]
                 else:
-                    parent_set = set()
-                    children_dict[parent] = parent_set
-                parent_set.add(child)
+                    children_list = []
+                    children_dict[parent] = children_list
+                if child not in children_list:
+                    children_list.append(child)
                 child = parent
                 parent = os.path.dirname(parent)
         self.children_dict = children_dict
         print("Finished find_children_dirs")
         pass
 
-    def output_cmake_files(self):
-        dirnames = list(self.dir_groups)
-        for dir in dirnames :
-            self.output_cmake_file_for_dir(dir)
-        print(f"")
+    def relative_path(self, the_path: str, the_dir: DirectoryName):
+        if the_path.startswith(the_dir):
+            if len(the_path) > len(the_dir):
+                result = the_path[len(the_dir)+1:]
+            else:
+                result = the_path
+        else:
+            result = the_path
+        return result
+
+    def get_group_properties(self, group: int) -> Set[str]:
+        group_partition_indices = self.group_list[group]
+        result = set()
+        for part_index in group_partition_indices:
+            part_set = self.partition[part_index]
+            result.update(part_set)
+        return result
+
+
+    def output_includes_for_group(self, libname: str, group: int, w):
+        group_properties: Set[str] = self.get_group_properties(group)
+
+        # For includes, the order may be important. Use the order of the
+        # first file for this group.
+        first_file = self.group_index_to_files[group][0]
+        file_props: List[str] = self.ofs_dict[first_file]
+        include_list = []
+        for prop in file_props:
+            assert(prop in group_properties)
+            if prop.startswith('-I '):
+                include_list.append(prop[3:])
+
+        if len(include_list) > 0:
+            w.write(f"\n# Includes for group {group}\n")
+            w.write(f"target_include_directories({libname} PUBLIC\n")
+            for file in include_list:
+                w.write(f"    {file}\n")
+            w.write(f"    )\n")
+        pass
+
+    def output_defines_for_group(self, libname: str, group: int, w):
+        group_properties: Set[str] = self.get_group_properties(group)
+
+        # For defines, the order is not important, but use the order of the
+        # first file for this group anyway.
+        first_file = self.group_index_to_files[group][0]
+        file_props: List[str] = self.ofs_dict[first_file]
+        define_set = set()
+        for prop in file_props:
+            assert(prop in group_properties)
+            if prop.startswith('-D '):
+                define_set.add(prop[3:])
+
+        define_list = list(define_set)
+        define_list = sorted(define_list)
+
+        # For defines with value, check no duplicates.
+        dup_dict = {}
+        for define in define_list:
+            parts = define.split("=")
+            assert(len(parts) <= 2)
+            if len(parts) == 2:
+                lhs = parts[0]
+                if lhs in dup_dict:
+                    print(f"Duplicate define: new={define}, previous='{lhs}={dup_dict[lhs]}'")
+                else:
+                    dup_dict[lhs]=parts[1]
+
+        if len(define_list) > 0:
+            w.write(f"\n# Defines for group {group}\n")
+            w.write(f"target_compile_definitions({libname} PUBLIC\n")
+            for define in define_list:
+                w.write(f"    {define}\n")
+            w.write(f"    )\n")
+        pass
+
+    def output_options_for_group(self, libname: str, group: int, w):
+        group_properties: Set[str] = self.get_group_properties(group)
+
+        # For options, the order is not important, but use the order of the
+        # first file for this group anyway.
+        first_file = self.group_index_to_files[group][0]
+        file_props: List[str] = self.ofs_dict[first_file]
+        option_set = set()
+        for prop in file_props:
+            assert(prop in group_properties)
+            if not prop.startswith('-D ') and not prop.startswith('-I '):
+                option_set.add(prop)
+
+        option_list = list(option_set)
+        option_list = sorted(option_list)
+
+        if len(option_list) > 0:
+            w.write(f"\n# Options for group {group}\n")
+            w.write(f"target_compile_definitions({libname} PUBLIC\n")
+            for option in option_list:
+                w.write(f"    {option}\n")
+            w.write(f"    )\n")
+        pass
+
+    def output_group_for_dir(self, level: int, the_dir: DirectoryName, group: int, w):
+        w.write(f"# Specification for group {group} for directory {the_dir}\n")
+        # Use the first source file for the name of the library.
+        group_dir_file_list = [file for file in self.group_index_to_files[group] if os.path.dirname(file) == the_dir]
+
+        assert(len(group_dir_file_list) > 0)
+        if len(self.dir_groups[the_dir]) > 1 or level == 1:
+            # This directory uses more than one group, so base library name on first file
+            first_file = group_dir_file_list[0]
+            first_without_ext = os.path.splitext(first_file)[0]
+            parts = first_without_ext.split('/')
+        else:
+            # Only one group. Base library name on directory.
+            parts = the_dir.split("/")
+
+        if 'src' in parts:
+            parts.remove('src')
+        libname = "_".join(parts[1:])
+        w.write(f"add_library({libname} STATIC\n")
+        for file in group_dir_file_list:
+            relative_file = self.relative_path(file, the_dir)
+            w.write(f"    {relative_file}\n")
+        w.write("    )\n")
+
+        self.output_includes_for_group(libname, group, w)
+        self.output_defines_for_group(libname, group, w)
+        self.output_options_for_group(libname, group, w)
+        w.write("\n")
+        pass
+
+    def output_single_cmake_file(self, level: int, the_dir: DirectoryName):
+        print(f"Processing dir={the_dir}")
+        relative_dir = the_dir[len(self.adjusted_target_dir):]
+        actual_target_dir = self.output_dir + relative_dir
+        os.makedirs(actual_target_dir, exist_ok=True)
+        cmake_file = os.path.join(actual_target_dir, "CMakeLists.txt")
+        with open(cmake_file, "w") as w:
+            if level == 1:
+                # Output special stuff for top level.
+                w.write(
+"""cmake_minimum_required(VERSION 3.10)
+
+# set the project name and version
+project(Booster VERSION 1.6)
+
+# specify the C++ standard
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_COMPILER clang++-9)
+""")
+                for symbol in self.symbol_dict:
+                    w.write(f"set({symbol} {self.symbol_dict[symbol]})\n")
+                pass
+
+            if the_dir in self.children_dict:
+                w.write("\n")
+                for child in self.children_dict[the_dir]:
+                    relative_child = child[len(the_dir)+1:]
+                    w.write(f"add_subdirectory({relative_child})\n")
+
+            if the_dir in self.dir_groups:
+                for group in self.dir_groups[the_dir]:
+                    self.output_group_for_dir(level, the_dir, group, w)
+
+        print(f"Done processing dir={the_dir}")
+
+        pass
+
+    def output_cmake_tree(self, level: int, root: DirectoryName):
+        self.output_single_cmake_file(level, root)
+        if root in self.children_dict:
+            for child in self.children_dict[root]:
+                self.output_cmake_tree(level + 1, child)
         pass
 
 def usage():
     """ Usage:
-    python3 poly-to-cmake.py poly_options_file target_dir [source_dir1 target_dir1 ...]
+    python3 poly-to-cmake.py poly_options_file triple [triple]...
 
     Write CMakeLists.txt files for a project that has previously
     been configured for Polyspace.
@@ -264,20 +474,15 @@ def usage():
     poly_options_file is the path to a Polyspace options file
     that contains the compilation options for each file of the project.
 
-    target_dir is the root of a directory tree into which the
-    cmake configuration files will be written. Usually this
-    will be a directory with the source files, but for
-    testing purposes it might be an empty directory.
+    The triples are strings of the form "old;symbolic;new"
+    where
+      "old" is a path on the system where Polyspace was run,
+      "symbolic" is a variable name that will be used the CMakeLists.txt files
+         to represent that directory.
+      "new" is a path to the corresponding directory on the current machine
 
-    Additional (source_dir, target_dir) pairs may be given
-    and paths starting with a source_dir will be rewritten to
-    reference the corresponding target_dir. At least
-    one pair must be given. source_dir1 is the root of the
-    code being compiled and we only produce CMakeLists.txt files
-    for directories under it. target_dir1 will be either
-    an actual or symbolic (e.g. ${top}) name of the target
-    directory into which the CMakeLists.txt files are written.
-    So semantically target_dir and target_dir1 are the same.
+    The first triple must be present and represents the source/target tree.
+    Subsequent triples can represent other directories referenced by the build.
     """
     print(usage.__doc__)
     sys.exit(1)
@@ -285,11 +490,14 @@ def usage():
 if __name__ == u'__main__':
     print('Using PolySpace Code Prover options to produce cmake configuration\n')
     options = sys.argv[1:]
-    if len(options) < 4 or (len(options) % 2 != 0):
+    if len(options) < 2:
         usage()
+    triples = options[1:]
+    for triple in triples:
+        if len(triple.split(';')) != 3:
+            usage()
 
-
-    cmconfig = CmakeConfigure(options[0], options[1], options[2:])
+    cmconfig = CmakeConfigure(options[0], triples)
     cmconfig.find_children_dirs()
-    cmconfig.output_cmake_files()
+    cmconfig.output_cmake_tree(1, cmconfig.adjusted_target_dir)
     print('\ndone.\n')

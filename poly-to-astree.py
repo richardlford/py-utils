@@ -7,8 +7,6 @@ import re
 import sys
 from typing import Dict, List, Set, FrozenSet
 from collections import defaultdict
-from dicttoxml import dicttoxml
-from xml.dom.minidom import parseString
 
 DirectoryName = str
 FileName = str
@@ -22,10 +20,11 @@ def get_includes(line: str) -> Set[str]:
                 if (part.startswith("-I ") and not part.startswith("-I /usr"))}
     return includes
 
+
 def partition_parts(part_dict: Dict[str, List[str]]) -> List[Set[str]]:
     part_keys = list(part_dict)
     num_keys = len(part_keys)
-    assert(num_keys > 0)
+    assert (num_keys > 0)
     first_key = part_keys[0]
     first_list = part_dict[first_key]
     first_set = set(first_list)
@@ -34,7 +33,7 @@ def partition_parts(part_dict: Dict[str, List[str]]) -> List[Set[str]]:
     for i in range(1, num_keys):
         for pi in partition:
             if len(pi) == 0:
-                assert(False)
+                assert (False)
         parts = set(part_dict[part_keys[i]])
         all_parts.update(parts)
         new_partition = []
@@ -42,7 +41,7 @@ def partition_parts(part_dict: Dict[str, List[str]]) -> List[Set[str]]:
             if len(parts) == 0:
                 new_partition.append(pi)
             elif parts.isdisjoint(pi):
-                    new_partition.append(pi)
+                new_partition.append(pi)
             elif parts == pi:
                 new_partition.append(pi)
                 parts = set()
@@ -64,11 +63,12 @@ def partition_parts(part_dict: Dict[str, List[str]]) -> List[Set[str]]:
     partition_all = set();
     for pi in partition:
         partition_all.update(pi)
-    assert(all_parts == partition_all)
+    assert (all_parts == partition_all)
     for i in range(len(partition)):
-        for k in range(i+1, len(partition)):
-            assert(partition[i].isdisjoint(partition[k]))
+        for k in range(i + 1, len(partition)):
+            assert (partition[i].isdisjoint(partition[k]))
     return partition
+
 
 def get_file_partition_indices(part_dict: Dict[FileName, List[str]], partition) -> Dict[FileName, List[int]]:
     result = {}
@@ -104,14 +104,17 @@ def get_index_groups(file_indices: Dict[FileName, List[int]]) -> Dict[FrozenSet[
             group_to_file_list_dict[indices].append(file)
         else:
             group_to_file_list_dict[indices] = [file]
-    group_list = sorted(list(group_to_file_list_dict), key=lambda fset: len(group_to_file_list_dict[fset]), reverse=True);
+    group_list = sorted(list(group_to_file_list_dict), key=lambda fset: len(group_to_file_list_dict[fset]),
+                        reverse=True);
     group_indices = dict([[group_list[i], i] for i in range(len(group_list))])
     group_index_to_files = dict([[group_indices[fset], group_to_file_list_dict[fset]] for fset in group_list])
     file_group = dict([[file, group_indices[frozenset(file_indices[file])]] for file in list(file_indices)])
-    group_index_to_dirs = dict([[fset_index, set([os.path.dirname(file) for file in group_index_to_files[fset_index]])] for fset_index in group_index_to_files])
+    group_index_to_dirs = dict(
+        [[fset_index, set([os.path.dirname(file) for file in group_index_to_files[fset_index]])] for fset_index in
+         group_index_to_files])
     # Get which group indices a directory is in. We fill in with empty lists so the
     # dictionary will be in alphabetical order (because the files are).
-    dir_groups : Dict[DirectoryName, List[int]] = dict([[os.path.dirname(file), []] for file in list(file_indices)])
+    dir_groups: Dict[DirectoryName, List[int]] = dict([[os.path.dirname(file), []] for file in list(file_indices)])
 
     for fset_index in list(group_index_to_dirs):
         dirs = group_index_to_dirs[fset_index]
@@ -119,11 +122,13 @@ def get_index_groups(file_indices: Dict[FileName, List[int]]) -> Dict[FrozenSet[
             dir_groups[dir].append(fset_index)
     return (group_list, group_index_to_files, file_group, group_index_to_dirs, dir_groups)
 
+
 def strip_leading(arg: str, leading: str):
     if arg.startswith(leading):
         return "./" + arg[len(leading):]
     else:
         return arg
+
 
 class AstreeConfigure:
     """ Digest .depend files"""
@@ -176,7 +181,7 @@ class AstreeConfigure:
                 filter_set.add(v)
             elif v.startswith('-D BIG'):
                 filter_set.add(v)
-            #elif v.startswith('-D CPU'):
+            # elif v.startswith('-D CPU'):
             #    filter_set.add(v)
             elif v.startswith('-D NRTSIM'):
                 filter_set.add(v)
@@ -189,7 +194,7 @@ class AstreeConfigure:
             # elif v.startswith('-cpp-version '):
             #     filter_set.add(v)
             elif not v.startswith('-lang ') and not v.startswith("-I ") \
-                and not v.startswith("-D ") :
+                    and not v.startswith("-D "):
                 filter_set.add(v)
 
         # Allow some others
@@ -213,7 +218,8 @@ class AstreeConfigure:
         print("Done filtering")
 
     def __init__(self, input_filename: FileName, output_filename: FileName, triples: List[str]):
-        self.indent = "    " #Amount to indent xml per level
+        # Amount to indent xml per level
+        self.indent = "    "
         self.input_filename = input_filename
         self.output_filename = output_filename
         self.adjust_dict = {}
@@ -225,21 +231,19 @@ class AstreeConfigure:
             symbol_ref = '${' + symbol + "}"
             self.adjust_dict[old] = symbol_ref + '/'
             self.symbol_dict[symbol_ref] = new[:-1]
-            if i == 0:
-                self.output_dir = new
-                # Target without trailing slash.
-                self.adjusted_target_dir = symbol_ref
 
         self.lines = self.read_input
         # Collect the -options-for-sources lines.
-        self.ofs_lines = [line[len("-options-for-sources "):] for line in self.lines if line.startswith("-options-for-sources ")]
-        ofs_dict0 = dict([[self.adjust_src(line.split(";")[0]), [self.strip_inc(option) for option in line.split(";")[1:]]]
+        self.ofs_lines = [line[len("-options-for-sources "):]
+                          for line in self.lines if line.startswith("-options-for-sources ")]
+        ofs_dict0 = dict([[self.adjust_src(line.split(";")[0]),
+                           [self.strip_inc(option) for option in line.split(";")[1:]]]
                           for line in self.ofs_lines])
         # Get ofs_dict in sorted order.
         self.filenames = sorted(ofs_dict0.keys())
         self.ofs_dict = dict([[file, ofs_dict0[file]] for file in self.filenames])
         self.vocabulary = self.get_vocabulary()
-        self.filter_vocabulary()
+        # self.filter_vocabulary()
         self.partition = partition_parts(self.ofs_dict)
         self.indices_dict = get_file_partition_indices(self.ofs_dict, self.partition)
         self.group_list, self.group_index_to_files, self.file_group, self.group_index_to_dirs, self.dir_groups = \
@@ -280,11 +284,10 @@ class AstreeConfigure:
             lines = [line.strip("\\\n") for line in f]
             return lines
 
-
     def relative_path(self, the_path: str, the_dir: DirectoryName):
         if the_path.startswith(the_dir):
             if len(the_path) > len(the_dir):
-                result = the_path[len(the_dir)+1:]
+                result = the_path[len(the_dir) + 1:]
             else:
                 result = the_path
         else:
@@ -299,7 +302,6 @@ class AstreeConfigure:
             result.update(part_set)
         return result
 
-
     def get_includes_for_group(self, libname: str, group: int):
         group_properties: Set[str] = self.get_group_properties(group)
 
@@ -309,7 +311,7 @@ class AstreeConfigure:
         file_props: List[str] = self.ofs_dict[first_file]
         include_list = []
         for prop in file_props:
-            assert(prop in group_properties)
+            assert (prop in group_properties)
             if prop.startswith('-I '):
                 include_list.append(self.expand_symbolic_src(prop[3:]))
 
@@ -324,7 +326,7 @@ class AstreeConfigure:
         file_props: List[str] = self.ofs_dict[first_file]
         define_set = set()
         for prop in file_props:
-            assert(prop in group_properties)
+            assert (prop in group_properties)
             if prop.startswith('-D '):
                 define_set.add(prop[3:])
 
@@ -335,13 +337,13 @@ class AstreeConfigure:
         dup_dict = {}
         for define in define_list:
             parts = define.split("=")
-            assert(len(parts) <= 2)
+            assert (len(parts) <= 2)
             if len(parts) == 2:
                 lhs = parts[0]
                 if lhs in dup_dict:
                     print(f"Duplicate define: new={define}, previous='{lhs}={dup_dict[lhs]}'")
                 else:
-                    dup_dict[lhs]=parts[1]
+                    dup_dict[lhs] = parts[1]
 
         return define_list
 
@@ -354,7 +356,7 @@ class AstreeConfigure:
         file_props: List[str] = self.ofs_dict[first_file]
         option_set = set()
         for prop in file_props:
-            assert(prop in group_properties)
+            assert (prop in group_properties)
             if not prop.startswith('-D ') and not prop.startswith('-I '):
                 option_set.add(prop)
 
@@ -368,7 +370,7 @@ class AstreeConfigure:
         # Use the first source file for the name of the library.
         group_dir_file_list = [file for file in self.group_index_to_files[group] if os.path.dirname(file) == the_dir]
 
-        assert(len(group_dir_file_list) > 0)
+        assert (len(group_dir_file_list) > 0)
         parts = the_dir.split("/")
         if len(self.dir_groups[the_dir]) > 1 or len(parts) == 1:
             # This directory uses more than one group, so base library name on first file
@@ -435,6 +437,7 @@ class AstreeConfigure:
         self.output_single(config, 'language', config['language'])
         self.output_list(config, 'files')
         self.output_list(config, 'includes')
+        self.output_list(config, 'defines')
         self.level -= 1
         self.addline(f"</config>")
         pass
@@ -467,9 +470,10 @@ class AstreeConfigure:
             pass
         print("Done writing")
 
+
 def usage():
     """ Usage:
-    python3 poly-to-astree.py  output_file  poly_options_file triple [triple]...
+    python3 poly-to-astree.py  output_file  poly_options_file [triple]...
 
     Write Astree configuration dax fragment for a project that has previously
     been configured for Polyspace.
@@ -486,16 +490,16 @@ def usage():
          to represent that directory.
       "new" is a path to the corresponding directory on the current machine
 
-    The first triple must be present and represents the source/target tree.
-    Subsequent triples can represent other directories referenced by the build.
+    The triples are optional
     """
     print(usage.__doc__)
     sys.exit(1)
 
+
 if __name__ == u'__main__':
     print('Using PolySpace Code Prover options to produce Astree configuration\n')
     options = sys.argv[1:]
-    if len(options) < 3:
+    if len(options) < 2:
         usage()
     triples = options[2:]
     for triple in triples:

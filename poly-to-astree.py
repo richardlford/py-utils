@@ -139,6 +139,14 @@ class AstreeConfigure:
                 return self.adjust_dict[old] + arg[len(old):]
         return arg
 
+    def old_to_new(self, arg: str):
+        for old in list(self.old_to_new_dict):
+            if arg.startswith(old):
+                return self.old_to_new_dict[old] + arg[len(old):]
+            elif arg.startswith('"' + old):
+                return '"' + self.old_to_new_dict[old] + arg[len(old)+1:]
+        return arg
+
     def expand_symbolic_src(self, arg: str):
         for symbolic_ref in list(self.symbol_dict):
             if arg.startswith(symbolic_ref):
@@ -224,6 +232,7 @@ class AstreeConfigure:
         self.output_filename = output_filename
         self.adjust_dict = {}
         self.symbol_dict = {}
+        self.old_to_new_dict = {}
         for i, triple in enumerate(triples):
             old, symbol, new = triple.split(';')
             old = self.normalize_dir(old)
@@ -231,6 +240,7 @@ class AstreeConfigure:
             symbol_ref = '${' + symbol + "}"
             self.adjust_dict[old] = symbol_ref + '/'
             self.symbol_dict[symbol_ref] = new[:-1]
+            self.old_to_new_dict[old] = new
 
         self.lines = self.read_input
         # Collect the -options-for-sources lines.
@@ -328,7 +338,13 @@ class AstreeConfigure:
         for prop in file_props:
             assert (prop in group_properties)
             if prop.startswith('-D '):
-                define_set.add(prop[3:])
+                old_def = prop[3:]
+                def_parts = old_def.split("=")
+                if len(def_parts) == 2:
+                    new_rhs = self.old_to_new(def_parts[1])
+                    def_parts[1] = new_rhs
+                    old_def = "=".join(def_parts)
+                define_set.add(old_def)
 
         define_list = list(define_set)
         define_list = sorted(define_list)
@@ -459,14 +475,15 @@ class AstreeConfigure:
             self.level = 0
             self.addline("""<?xml version="1.0" encoding="utf-8"?>
 <dax mode="astree" comment-mode="AAL" version="1.9" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.absint.com/dtd/a3-dax-20.04.xsd" xmlns="http://www.absint.com/dax">
-    <preprocess>""")
-            self.level = 2
+    <preprocess>
+        <config name="TopConfig">""")
+            self.level = 3
             for config in configs:
                 self.output_config(config)
             self.level = 0
-            self.addline("""    </preprocess>
-</dax>
-""")
+            self.addline("""        </config>
+    </preprocess>
+</dax>""")
             pass
         print("Done writing")
 
